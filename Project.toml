@@ -1,0 +1,9 @@
+name = "FluxModels"
+uuid = "d030de00-c3f8-11e9-38c7-cf17a4219d27"
+authors = ["Soyukke "]
+version = "0.1.0"
+
+[deps]
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
