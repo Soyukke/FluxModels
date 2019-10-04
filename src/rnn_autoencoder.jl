@@ -33,7 +33,7 @@ struct SequentialData
 end
 
 function get_shuffled_traindata(sequence_data, batch_size)
-    n_data = size(data.sequence_data[1])[2]
+    n_data = size(sequence_data[1])[2]
     vindices = collect(Iterators.partition(randperm(n_data), batch_size))
     return [([x[:, indices] for x in sequence_data],) for indices in vindices]
 end
@@ -74,6 +74,7 @@ struct Decoder
     end
 end
 Flux.@treelike Decoder
+
 function (d::Decoder)(h)
     reset!(d.gru)
     _, batch_size = size(h)
@@ -106,13 +107,13 @@ Flux.@treelike Seq2Seq
 loss_total = 0
 function loss_func(m::Seq2Seq)
     weight = ones(m.decoder.n_char)
-    weight[end] = 0
+    weight[end] = 0 # end is <PAD> index
     return function loss(seq_x)
         hidden_state = m.encoder(reverse(seq_x))
         predict = m.decoder(hidden_state)
-        t = reduce(hcat, map(x->x, seq_x[2:end]))
+        t = reduce(hcat, map(x->x, seq_x[2:end])) # 1 is <SOS> so skip
         loss_batch = Flux.crossentropy(predict, t, weight=weight)
-        global loss_total += loss_batch
+        global loss_total += loss_batch.data
         return loss_batch
     end
 end
