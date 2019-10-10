@@ -1,8 +1,6 @@
 module RNNAutoencoder
 
-import Flux:onehotbatch
 using Flux
-using Flux:reset!
 using Random
 using Printf
 
@@ -26,10 +24,24 @@ struct SequentialData
         strs_edited = map(x -> ["<SOS>", string.(collect(x))..., "<EOS>"], strs)
         data = map(x->append!(x, collect(Iterators.repeated("<PAD>", n_seq-length(x)))), strs_edited)
         data_char = reduce(hcat, data)
-        sequence_data = [onehotbatch(data_char[i, :], charlist) for i in 1:n_seq]
+        sequence_data = [Flux.onehotbatch(data_char[i, :], charlist) for i in 1:n_seq]
 
         return new(n_char, n_seq, charlist, id_sos, id_eos, id_pad, strs, sequence_data)
     end
+end
+
+"""
+sample_data(sequence_data, N::Integer)
+sampling N data from sequence_data
+
+sampled_data = sample_data(sequence_data, 100)
+loss = loss_func(m)
+return data can use loss(sampled_data)
+"""
+function sample_data(sequence_data, N::Integer)
+    n_data = size(sequence_data[1])[2]
+    indices = randperm(n_data)[1:N]
+    return [x[:, indices] for x in sequence_data]
 end
 
 function get_shuffled_traindata(sequence_data, batch_size)
@@ -53,7 +65,7 @@ end
 Flux.@treelike Encoder # params()の呼び出しを可能にする
 
 function (e::Encoder)(x)
-    reset!(e.gru)
+    Flux.reset!(e.gru)
     vindices = map(onehot_to_indices, x)
     x = map(x1 -> e.embed[:, x1], vindices)
     hidden = e.gru.(x)[end]
@@ -76,8 +88,12 @@ end
 Flux.@treelike Decoder
 
 function (d::Decoder)(h)
-    reset!(d.gru)
-    _, batch_size = size(h)
+    Flux.reset!(d.gru)
+    if length(size(h)) == 1
+        batch_size = 1
+    else
+        _, batch_size = size(h)
+    end
     d.gru.state = h
     sos = d.embed[:, [d.n_char-1 for _ in 1:batch_size]]
     x = d.gru(sos)
@@ -93,19 +109,24 @@ function (d::Decoder)(h)
 end
 
 
-struct Seq2Seq
+struct Autoencoder
     encoder::Encoder
     decoder::Decoder
-    function Seq2Seq(features, n_char, n_seq)
+    function Autoencoder(features, n_char, n_seq)
         encoder = Encoder(features, n_char)
         decoder = Decoder(features, n_char, n_seq)
         return new(encoder, decoder)
     end
 end
-Flux.@treelike Seq2Seq
+Flux.@treelike Autoencoder
 
-loss_total = 0
-function loss_func(m::Seq2Seq)
+function (m::Autoencoder)(seq_x)
+    hidden_state = m.encoder(reverse(seq_x))
+    predict = m.decoder(hidden_state)
+    return predict
+end
+
+function loss_func(m::Autoencoder)
     weight = ones(m.decoder.n_char)
     weight[end] = 0 # end is <PAD> index
     return function loss(seq_x)
@@ -113,9 +134,37 @@ function loss_func(m::Seq2Seq)
         predict = m.decoder(hidden_state)
         t = reduce(hcat, map(x->x, seq_x[2:end])) # 1 is <SOS> so skip
         loss_batch = Flux.crossentropy(predict, t, weight=weight)
-        global loss_total += loss_batch.data
         return loss_batch
     end
+end
+
+function str2sequence(str, sdata::SequentialData)
+    str = ["<SOS>", string.(collect(str))..., "<EOS>"]
+    append!(str, collect(Iterators.repeated("<PAD>", sdata.n_seq - length(str))))
+    onehot = Flux.onehotbatch(str, sdata.charlist)
+    return [onehot[:, i] for i in 1:size(onehot)[2]]
+end
+
+function reconstruction_string(m::Autoencoder, sdata::SequentialData, str::AbstractString)
+    seq_one = str2sequence(str, sdata)
+    predict_onehot = m(seq_one)
+    predict_strs = Flux.onecold(predict_onehot, sdata.charlist)
+    eos_index = findfirst(x->x=="<EOS>", predict_strs)
+    eos_index = eos_index === nothing ? sdata.n_seq : eos_index
+    return reduce(*, predict_strs[1:eos_index-1])
+end
+
+"""
+    z_to_string
+
+    latent vector z to string
+"""
+function z_to_string(m::Autoencoder, sdata::SequentialData, z)
+    predict_onehot = m.decoder(z)
+    predict_strs = Flux.onecold(predict_onehot, sdata.charlist)
+    eos_index = findfirst(x->x=="<EOS>", predict_strs)
+    eos_index = eos_index === nothing ? sdata.n_seq : eos_index
+    return reduce(*, predict_strs[1:eos_index-1])
 end
 
 end # module

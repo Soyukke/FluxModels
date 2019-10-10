@@ -11,5 +11,4 @@ function split_data(data::Vector, n_train)
     return shuffled_data[1:n_train], shuffled_data[n_train+1:end]
 end
 
-export RNNAutoencoder
 end # module
